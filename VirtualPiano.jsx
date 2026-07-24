@@ -14,10 +14,10 @@
  */
 
 import { useState, useRef } from "react";
-import { useTracks } from "../../context/TrackContext";
-import { playPianoNote } from "../../audio/synth";
-import { noteToFreq, detectChordFromNotes, getProgressions, qSnap } from "../../audio/theory";
-import { NOTE_NAMES, PIANO_KEYS, WHITE_KEY_WIDTH, BLACK_KEY_WIDTH, WHITE_KEY_HEIGHT, BLACK_KEY_HEIGHT } from "../../constants";
+import { useTracks } from "./TrackContext";
+import { playPianoNote } from "./synth";
+import { noteToFreq, detectChordFromNotes, getProgressions, qSnap } from "./audioTheory";
+import { NOTE_NAMES, PIANO_KEYS, WHITE_KEY_WIDTH, BLACK_KEY_WIDTH, WHITE_KEY_HEIGHT, BLACK_KEY_HEIGHT } from "./theory";
 
 // Diatonic order used for staff placement
 const NOTE_ORDER = ["C","D","E","F","G","A","B"];

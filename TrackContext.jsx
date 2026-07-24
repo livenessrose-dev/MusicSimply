@@ -11,7 +11,7 @@
  */
 
 import { createContext, useContext, useReducer, useCallback } from "react";
-import { TRACK_COLORS } from "../constants";
+import { TRACK_COLORS } from "./theory";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Reducer

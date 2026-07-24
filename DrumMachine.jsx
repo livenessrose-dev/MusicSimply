@@ -10,9 +10,9 @@
  */
 
 import { useState, useEffect, useRef } from "react";
-import { useTracks } from "../../context/TrackContext";
-import { playDrumSound } from "../../audio/synth";
-import { DRUM_SOUNDS, DRUM_COLORS, DRUM_STEPS } from "../../constants";
+import { useTracks } from "./TrackContext";
+import { playDrumSound } from "./synth";
+import { DRUM_SOUNDS, DRUM_COLORS, DRUM_STEPS } from "./theory";
 
 const BEAT_MARKERS = [0, 4, 8, 12]; // bar/beat dividers
 

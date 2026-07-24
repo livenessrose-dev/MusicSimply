@@ -7,7 +7,7 @@
  *   onToggleMic — () => void
  */
 
-import { GUITAR_STRINGS } from "../../constants";
+import { GUITAR_STRINGS } from "./theory";
 
 export default function SemicircleTuner({ noteInfo, micOn, onToggleMic }) {
   const cx = 150, cy = 145, r = 110;

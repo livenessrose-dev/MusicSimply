@@ -12,7 +12,7 @@
  */
 
 import { useState, useRef } from "react";
-import { useTracks } from "../../context/TrackContext";
+import { useTracks } from "./TrackContext";
 
 const INST_COLORS = { Piano:"#a78bfa", Guitar:"#fb923c", Voice:"#f472b6" };
 

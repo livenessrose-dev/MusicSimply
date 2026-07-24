@@ -1,99 +1,104 @@
-/**
- * audio/theory.js
- * Pure music-theory functions — no Web Audio, no React.
- * Safe to import anywhere.
- */
-
-import { NOTE_NAMES, CHORD_INTERVALS, CHORD_PROGRESSIONS } from "../constants";
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Frequency ↔ note conversion
+// Music theory constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Convert a note name + octave to Hz (equal temperament, A4 = 440 Hz). */
-export function noteToFreq(note, octave) {
-  const idx = NOTE_NAMES.indexOf(note);
-  return 440 * Math.pow(2, ((octave + 1) * 12 + idx - 69) / 12);
-}
+export const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 
-/**
- * Convert a raw frequency to a { note, octave, cents, freq, targetFreq, midi }
- * object.  Returns null for invalid input.
- */
-export function freqToNoteInfo(freq) {
-  if (!freq || freq <= 0) return null;
-  const midi      = Math.round(12 * Math.log2(freq / 440) + 69);
-  const noteIdx   = ((midi % 12) + 12) % 12;
-  const octave    = Math.floor(midi / 12) - 1;
-  const targetFreq = 440 * Math.pow(2, (midi - 69) / 12);
-  const cents     = Math.round(1200 * Math.log2(freq / targetFreq));
-  return { note: NOTE_NAMES[noteIdx], octave, cents, freq: freq.toFixed(1), targetFreq, midi };
-}
+export const CHORD_INTERVALS = {
+  "maj":  [0,4,7],
+  "min":  [0,3,7],
+  "7":    [0,4,7,10],
+  "maj7": [0,4,7,11],
+  "min7": [0,3,7,10],
+  "dim":  [0,3,6],
+  "aug":  [0,4,8],
+  "sus2": [0,2,7],
+  "sus4": [0,5,7],
+};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Chord detection
-// ─────────────────────────────────────────────────────────────────────────────
+export const CHORD_PROGRESSIONS = {
+  "I–V–vi–IV":    [0,7,9,5],
+  "I–IV–V":       [0,5,7],
+  "I–vi–IV–V":    [0,9,5,7],
+  "ii–V–I":       [2,7,0],
+  "vi–IV–I–V":    [9,5,0,7],
+  "12-bar blues": [0,0,0,0,5,5,0,0,7,5,0,7],
+};
 
-/**
- * Given an array of MIDI note numbers, return the best-matching chord or null.
- * Returns { root, type, intervals, partial? }.
- */
-export function detectChordFromNotes(midiNotes) {
-  if (!midiNotes || midiNotes.length < 2) return null;
-
-  // Deduplicate pitch classes
-  const pcs = [...new Set(midiNotes.map(m => ((m % 12) + 12) % 12))].sort((a, b) => a - b);
-
-  // Try every pitch class as root — exact match first
-  for (const root of pcs) {
-    const ivs = pcs.map(p => ((p - root + 12) % 12)).sort((a, b) => a - b);
-    for (const [name, pat] of Object.entries(CHORD_INTERVALS)) {
-      if (pat.length === ivs.length && pat.every((v, i) => ivs[i] === v)) {
-        return { root: NOTE_NAMES[root], type: name, intervals: ivs };
-      }
-    }
-  }
-
-  // Partial match (at least a triad skeleton)
-  for (const root of pcs) {
-    const ivs = pcs.map(p => ((p - root + 12) % 12));
-    if (ivs.includes(4) && ivs.includes(7)) return { root: NOTE_NAMES[root], type: "maj", partial: true };
-    if (ivs.includes(3) && ivs.includes(7)) return { root: NOTE_NAMES[root], type: "min", partial: true };
-  }
-
-  return null;
-}
+export const CHORD_TYPE_LABELS = {
+  "maj":  "Major",
+  "min":  "Minor",
+  "7":    "Dom 7",
+  "maj7": "Major 7",
+  "min7": "Minor 7",
+  "dim":  "Diminished",
+  "aug":  "Augmented",
+  "sus2": "Sus2",
+  "sus4": "Sus4",
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Chord progressions
+// Drum constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Given a root note name, return an array of named progressions, each with
- * { name, chords: string[] } transposed to that root.
- */
-export function getProgressions(rootNote) {
-  const ri = NOTE_NAMES.indexOf(rootNote);
-  if (ri === -1) return [];
+export const DRUM_SOUNDS = ["Kick","Snare","Hi-Hat","Open HH","Clap","Tom","Crash","Ride"];
 
-  return Object.entries(CHORD_PROGRESSIONS).slice(0, 5).map(([name, semis]) => ({
-    name,
-    chords: semis.slice(0, 4).map(s => {
-      const noteIdx = (ri + s) % 12;
-      const isMinor = [2, 9].includes(s % 12);
-      return NOTE_NAMES[noteIdx] + (isMinor ? "m" : "");
-    }),
-  }));
-}
+export const DRUM_COLORS = [
+  "#f87171","#fb923c","#fbbf24","#a3e635",
+  "#34d399","#38bdf8","#a78bfa","#f472b6",
+];
+
+export const DRUM_STEPS = 16;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Quantization
+// Piano keyboard layout (2 octaves: C4–B5)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Snap a timestamp (ms) to the nearest 16th-note grid at the given BPM.
- */
-export function qSnap(timeMs, bpm) {
-  const divMs = (60000 / bpm) / 4; // 16th note duration
-  return Math.round(timeMs / divMs) * divMs;
-}
+export const PIANO_KEYS = [
+  {note:"C", oct:4,black:false},{note:"C#",oct:4,black:true},
+  {note:"D", oct:4,black:false},{note:"D#",oct:4,black:true},
+  {note:"E", oct:4,black:false},{note:"F", oct:4,black:false},
+  {note:"F#",oct:4,black:true}, {note:"G", oct:4,black:false},
+  {note:"G#",oct:4,black:true}, {note:"A", oct:4,black:false},
+  {note:"A#",oct:4,black:true}, {note:"B", oct:4,black:false},
+  {note:"C", oct:5,black:false},{note:"C#",oct:5,black:true},
+  {note:"D", oct:5,black:false},{note:"D#",oct:5,black:true},
+  {note:"E", oct:5,black:false},{note:"F", oct:5,black:false},
+  {note:"F#",oct:5,black:true}, {note:"G", oct:5,black:false},
+  {note:"G#",oct:5,black:true}, {note:"A", oct:5,black:false},
+  {note:"A#",oct:5,black:true}, {note:"B", oct:5,black:false},
+];
+
+export const WHITE_KEY_WIDTH = 36;   // px
+export const BLACK_KEY_WIDTH = 22;   // px
+export const WHITE_KEY_HEIGHT = 140; // px
+export const BLACK_KEY_HEIGHT = 88;  // px
+
+// ─────────────────────────────────────────────────────────────────────────────
+// App UI
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const TABS = [
+  "🎸 Tuner",
+  "🎼 Chords",
+  "🎹 Piano",
+  "🥁 Drums",
+  "🎙 Tracks",
+  "🗂 Timeline",
+];
+
+// Cycling palette assigned to new tracks
+export const TRACK_COLORS = [
+  "#a78bfa","#f472b6","#fb923c","#fbbf24",
+  "#4ade80","#38bdf8","#f87171","#34d399",
+];
+
+// Guitar standard tuning reference (label, Hz)
+export const GUITAR_STRINGS = [
+  ["E2", 82.4],
+  ["A2", 110],
+  ["D3", 146.8],
+  ["G3", 196],
+  ["B3", 246.9],
+  ["E4", 329.6],
+];

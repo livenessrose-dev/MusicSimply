@@ -34,14 +34,18 @@ const BASS_STAFF_PITCHES = [
   "C/4","B/3","A/3","G/3","F/3","E/3","D/3","C/3","B/2","A/2","G/2","F/2","E/2","D/2","C/2"
 ];
  
-const DEFAULT_TREBLE = [
-  { pitch:"C/4", duration:"q" },
-  { pitch:"E/4", duration:"q" },
-  { pitch:"G/4", duration:"q" },
-  { pitch:"C/5", duration:"h" },
-];
-const DEFAULT_BASS = [
-  { pitch:"C/3", duration:"w" },
+// Sheet starts blank — no pre-filled notes.
+const DEFAULT_TREBLE = [];
+const DEFAULT_BASS   = [];
+
+// Always show at least this many measures, even before any notes exist.
+const MIN_MEASURES = 4;
+
+// Accidentals the person can toggle on before placing a note.
+const ACCIDENTAL_OPTIONS = [
+  { key:"#", label:"Sharp",   symbol:"♯" },
+  { key:"b", label:"Flat",    symbol:"♭" },
+  { key:"n", label:"Natural", symbol:"♮" },
 ];
  
 // ── Layout constants (must match renderScore) ─────────────────────────────────
@@ -53,6 +57,7 @@ const SYSTEM_H   = 230;
 const HEADER_Y   = 80;   // where row 0 starts in SVG
 const STAFF_LINE_H = 10; // pixels between staff lines (VexFlow default ~10)
 const STAFF_TOP_OFFSET = 35; // pixels from stave top to first (top) line
+const NOTE_HIT_RADIUS = 16;  // px (svg space) — how close a click needs to be to select an existing note
  
 export default function SheetMusicEditor() {
   const [title,        setTitle]        = useState("");
@@ -63,15 +68,18 @@ export default function SheetMusicEditor() {
   const [timeSig,      setTimeSig]      = useState("4/4");
   const [activeStaff,  setActiveStaff]  = useState("treble");
   const [selectedDur,  setSelectedDur]  = useState("q");
+  const [accidental,   setAccidental]   = useState(null); // null | "#" | "b" | "n"
   const [trebleNotes,  setTrebleNotes]  = useState(DEFAULT_TREBLE);
   const [bassNotes,    setBassNotes]    = useState(DEFAULT_BASS);
   const [status,       setStatus]       = useState("");
   const [hoverPitch,   setHoverPitch]   = useState(null); // ghost note on hover
   const [hoverPos,     setHoverPos]     = useState(null); // {x,y} in SVG coords
+  const [selectedNote, setSelectedNote] = useState(null); // {clef, idx} | null — note being edited
  
   const scoreRef    = useRef(null);
   const overlayRef  = useRef(null);
   const svgSizeRef  = useRef({ w:800, h:400 }); // track SVG dimensions
+  const notePositionsRef = useRef({ treble: [], bass: [] }); // {idx, x, y}[] per clef, rebuilt every render
  
   // ── Re-render score whenever notes or metadata change ─────────────────────
   useEffect(() => { renderScore(); }, [
@@ -85,11 +93,13 @@ export default function SheetMusicEditor() {
       const VF = await import("vexflow");
       const {
         Renderer, Stave, StaveNote, Voice, Formatter,
-        Accidental, StaveConnector, Beam,
+        Accidental, StaveConnector, Beam, GhostNote,
       } = VF.default?.Flow ?? VF.Flow ?? VF;
  
       const container = scoreRef.current;
       container.innerHTML = "";
+
+      const positions = { treble: [], bass: [] }; // filled in as notes are drawn below
  
       const [beatsPerBar, beatUnit] = timeSig.split("/").map(Number);
       const durBeats = { w:4, h:2, q:1, "8":0.5, "16":0.25 };
@@ -97,13 +107,13 @@ export default function SheetMusicEditor() {
       function splitMeasures(notes) {
         const measures = [];
         let bar = [], beats = 0;
-        for (const n of notes) {
+        notes.forEach((n, idx) => {
           const b = durBeats[n.duration] ?? 1;
           if (beats + b > beatsPerBar && bar.length) {
             measures.push(bar); bar = []; beats = 0;
           }
-          bar.push(n); beats += b;
-        }
+          bar.push({ ...n, _idx: idx }); beats += b;
+        });
         if (bar.length) measures.push(bar);
         if (!measures.length) measures.push([]);
         return measures;
@@ -111,7 +121,7 @@ export default function SheetMusicEditor() {
  
       const trebleMeasures = splitMeasures(trebleNotes);
       const bassMeasures   = splitMeasures(bassNotes);
-      const numMeasures    = Math.max(trebleMeasures.length, bassMeasures.length);
+      const numMeasures    = Math.max(trebleMeasures.length, bassMeasures.length, MIN_MEASURES);
       const containerW     = container.clientWidth || 800;
       const measPerRow     = Math.max(1, Math.floor((containerW - STAVE_PAD) / STAVE_W));
       const numRows        = Math.ceil(numMeasures / measPerRow);
@@ -178,21 +188,50 @@ export default function SheetMusicEditor() {
                 clef, keys:[n.pitch],
                 duration: n.duration + (n.rest ? "r" : ""),
               });
-              if (!n.rest && n.pitch.includes("#")) sn.addModifier(new Accidental("#"), 0);
-              if (!n.rest && n.pitch.includes("b")) sn.addModifier(new Accidental("b"), 0);
+              if (!n.rest && n.accidental) sn.addModifier(new Accidental(n.accidental), 0);
               return sn;
             });
- 
+
+          // Pad a measure out to a full bar with invisible GhostNotes so the
+          // Formatter always justifies against the same total tick count.
+          // Without this, a measure with only 1-2 real notes gets stretched
+          // or squashed oddly and only looks "right" once enough notes fill it.
+          const padWithGhosts = (vfNotes, noteArr) => {
+            const used = noteArr.reduce((s, n) => s + (durBeats[n.duration] ?? 1), 0);
+            let remaining = beatsPerBar - used;
+            const order = [["w",4],["h",2],["q",1],["8",0.5],["16",0.25]];
+            let guard = 0;
+            while (remaining > 0.001 && guard < 20) {
+              guard++;
+              const fit = order.find(([, b]) => b <= remaining + 0.001);
+              if (!fit) break;
+              vfNotes.push(new GhostNote({ duration: fit[0] }));
+              remaining -= fit[1];
+            }
+            return vfNotes;
+          };
+
           const drawVoice = (notes, stave, clef) => {
-            if (!notes.length) return;
             try {
-              const vfNotes = buildVFNotes(notes, clef);
-              const voice   = new Voice({ num_beats:beatsPerBar, beat_value:beatUnit })
+              const realNotes = buildVFNotes(notes, clef);
+              const vfNotes   = padWithGhosts([...realNotes], notes);
+              const voice     = new Voice({ num_beats:beatsPerBar, beat_value:beatUnit })
                 .setStrict(false).addTickables(vfNotes);
-              const beams = Beam.generateBeams(vfNotes);
+              const beams = Beam.generateBeams(realNotes);
               new Formatter().joinVoices([voice]).format([voice], STAVE_W - 30);
               voice.draw(ctx, stave);
               beams.forEach(b => b.setContext(ctx).draw());
+
+              notes.forEach((n, i) => {
+                const sn = realNotes[i];
+                if (!sn || typeof n._idx !== "number") return;
+                try {
+                  const nx = sn.getAbsoluteX();
+                  const ys = sn.getYs ? sn.getYs() : [];
+                  const ny = ys.length ? ys[0] : stave.getYForLine(2);
+                  positions[clef].push({ idx: n._idx, x: nx, y: ny });
+                } catch {}
+              });
             } catch {}
           };
  
@@ -210,6 +249,7 @@ export default function SheetMusicEditor() {
             : StaveConnector.type.SINGLE_RIGHT)
           .setContext(ctx).draw();
       }
+      notePositionsRef.current = positions;
       setStatus("");
     } catch (e) {
       setStatus("Render error: " + e.message);
@@ -269,12 +309,35 @@ export default function SheetMusicEditor() {
     return { svgX, svgY, staffType, pitch, rowY };
   }
  
-  // ── Handle click on SVG → insert note ────────────────────────────────────
+  // ── Find an existing note near a click, for selecting/editing it ──────────
+  function hitTestNote(svgX, svgY, clef) {
+    const pts = notePositionsRef.current[clef] || [];
+    let best = null, bestDist = NOTE_HIT_RADIUS;
+    for (const p of pts) {
+      const d = Math.hypot(p.x - svgX, p.y - svgY);
+      if (d <= bestDist) { bestDist = d; best = p; }
+    }
+    return best;
+  }
+
+  // ── Handle click on SVG → select an existing note, or insert a new one ────
   function handleScoreClick(e) {
     const info = svgCoordsToStaffInfo(e);
     if (!info) return;
- 
-    const note = { pitch: info.pitch, duration: selectedDur, rest: false };
+
+    const hit = hitTestNote(info.svgX, info.svgY, info.staffType);
+    if (hit) {
+      setActiveStaff(info.staffType);
+      setSelectedNote(cur =>
+        (cur && cur.clef === info.staffType && cur.idx === hit.idx)
+          ? null
+          : { clef: info.staffType, idx: hit.idx }
+      );
+      return;
+    }
+
+    setSelectedNote(null);
+    const note = { pitch: info.pitch, duration: selectedDur, rest: false, accidental };
     if (info.staffType === "treble") {
       setTrebleNotes(n => [...n, note]);
       setActiveStaff("treble");
@@ -283,6 +346,7 @@ export default function SheetMusicEditor() {
       setActiveStaff("bass");
     }
   }
+
  
   // ── Handle hover → show ghost note ───────────────────────────────────────
   function handleScoreHover(e) {
@@ -307,24 +371,80 @@ export default function SheetMusicEditor() {
   function undoLast() {
     if (activeStaff==="treble") setTrebleNotes(n => n.slice(0,-1));
     else setBassNotes(n => n.slice(0,-1));
+    setSelectedNote(cur => (cur && cur.clef===activeStaff) ? null : cur);
   }
   function clearStaff() {
     if (activeStaff==="treble") setTrebleNotes([]);
     else setBassNotes([]);
+    setSelectedNote(cur => (cur && cur.clef===activeStaff) ? null : cur);
   }
- 
+
+  // ── Type a letter (A–G) to insert that pitch as the next note ─────────────
+  // Picks the octave nearest the previous note in the active staff so typed
+  // melodies move stepwise instead of jumping registers.
+  const LETTER_ORDER = ["C","D","E","F","G","A","B"];
+  function insertLetterNote(letter) {
+    const clef = activeStaff;
+    const notes = clef === "treble" ? trebleNotes : bassNotes;
+    const defaultOctave = clef === "treble" ? 4 : 3;
+    const prev = [...notes].reverse().find(n => !n.rest);
+
+    let baseOctave = defaultOctave;
+    let prevLetter = letter;
+    if (prev) {
+      const [pl, po] = prev.pitch.split("/");
+      prevLetter = pl;
+      baseOctave = parseInt(po, 10);
+    }
+    const dStep = (l, o) => LETTER_ORDER.indexOf(l) + 7*o;
+    const prevStep = dStep(prevLetter, baseOctave);
+
+    let bestOctave = baseOctave, bestDist = Infinity;
+    for (const o of [baseOctave - 1, baseOctave, baseOctave + 1]) {
+      const dist = Math.abs(dStep(letter, o) - prevStep);
+      if (dist < bestDist) { bestDist = dist; bestOctave = o; }
+    }
+
+    const note = { pitch: `${letter}/${bestOctave}`, duration: selectedDur, rest: false, accidental };
+    if (clef === "treble") setTrebleNotes(n => [...n, note]);
+    else setBassNotes(n => [...n, note]);
+    setSelectedNote(null);
+  }
+
+  // ── Keyboard shortcut: typing A–G inserts the next note ────────────────────
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      const letter = e.key.length === 1 ? e.key.toUpperCase() : "";
+      if (!LETTER_ORDER.includes(letter)) return;
+      e.preventDefault();
+      insertLetterNote(letter);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStaff, selectedDur, accidental, trebleNotes, bassNotes]);
+
+  // ── Currently-selected note's data, if any (drives Duration/Accidental UI) ─
+  const selectedNoteData = selectedNote
+    ? (selectedNote.clef === "treble" ? trebleNotes : bassNotes)[selectedNote.idx] ?? null
+    : null;
+
   // ── Styles ────────────────────────────────────────────────────────────────
   const accent      = "#7c3aed";
   const accentLight = "#a78bfa";
-  const bg          = "#0a0e1a";
-  const panel       = "#111827";
-  const border      = "#1f2937";
+  const bg          = "#ffffff";
+  const panel       = "#f9fafb";
+  const border      = "#e5e7eb";
  
   const selectedDurSymbol = DURATION_OPTIONS.find(d => d.key === selectedDur)?.symbol ?? "♩";
+  const accidentalSymbol  = ACCIDENTAL_OPTIONS.find(a => a.key === accidental)?.symbol ?? "";
  
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",
-      background:bg, color:"#e5e7eb", fontFamily:"'Nunito',sans-serif",
+      background:bg, color:"#1f2837", fontFamily:"'Nunito',sans-serif",
       overflow:"hidden" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800&display=swap');
@@ -332,8 +452,8 @@ export default function SheetMusicEditor() {
         .meta-input { background:transparent; border:none; border-bottom:1.5px solid #1f2937;
           color:#e5e7eb; font-family:'Nunito',sans-serif; font-size:13px; padding:4px 0;
           width:100%; transition:border-color 0.2s; }
-        .meta-input:focus { outline:none; border-bottom-color:#7c3aed; }
-        .meta-input::placeholder { color:#374151; }
+        .meta-input:focus { outline:none; border-bottom-color:#d1d5db; }
+        .meta-input::placeholder { color:#9ca3af; }
         .score-svg-wrap { position:relative; cursor:crosshair; }
         .score-svg-wrap svg { display:block; }
       `}</style>
@@ -403,20 +523,60 @@ export default function SheetMusicEditor() {
           ))}
         </div>
  
-        {/* Duration — selecting this changes what gets entered on click */}
+        {/* Duration — edits the selected note, or sets what gets entered next */}
         <div style={{ display:"flex", gap:3, alignItems:"center" }}>
-          <span style={{ fontSize:10, color:"#4b5563", fontWeight:700,
+          <span style={{ fontSize:10, color: selectedNoteData ? "#22d3ee" : "#4b5563", fontWeight:700,
             textTransform:"uppercase", letterSpacing:1 }}>Duration</span>
-          {DURATION_OPTIONS.map(d => (
-            <button key={d.key} onClick={() => setSelectedDur(d.key)}
-              title={d.label} style={{
-                padding:"3px 9px", borderRadius:7,
-                border:`1.5px solid ${selectedDur===d.key ? "#fb923c" : border}`,
-                background: selectedDur===d.key ? "#fb923c22" : "transparent",
-                color: selectedDur===d.key ? "#fb923c" : "#6b7280",
-                fontSize:18, cursor:"pointer", lineHeight:1
-              }}>{d.symbol}</button>
-          ))}
+          {DURATION_OPTIONS.map(d => {
+            const isActive = (selectedNoteData ? selectedNoteData.duration : selectedDur) === d.key;
+            return (
+              <button key={d.key}
+                onClick={() => {
+                  if (selectedNote && selectedNoteData) {
+                    const setter = selectedNote.clef === "treble" ? setTrebleNotes : setBassNotes;
+                    setter(arr => arr.map((n,i) => i===selectedNote.idx ? { ...n, duration:d.key } : n));
+                  } else {
+                    setSelectedDur(d.key);
+                  }
+                }}
+                title={d.label} style={{
+                  padding:"3px 9px", borderRadius:7,
+                  border:`1.5px solid ${isActive ? "#fb923c" : border}`,
+                  background: isActive ? "#fb923c22" : "transparent",
+                  color: isActive ? "#fb923c" : "#6b7280",
+                  fontSize:18, cursor:"pointer", lineHeight:1
+                }}>{d.symbol}</button>
+            );
+          })}
+        </div>
+
+        {/* Accidental — edits the selected note, or sets what gets entered next */}
+        <div style={{ display:"flex", gap:3, alignItems:"center" }}>
+          <span style={{ fontSize:10, color: selectedNoteData ? "#22d3ee" : "#4b5563", fontWeight:700,
+            textTransform:"uppercase", letterSpacing:1 }}>Accidental</span>
+          {ACCIDENTAL_OPTIONS.map(a => {
+            const current = selectedNoteData ? selectedNoteData.accidental : accidental;
+            const isActive = current === a.key;
+            return (
+              <button key={a.key}
+                onClick={() => {
+                  if (selectedNote && selectedNoteData) {
+                    const newAcc = selectedNoteData.accidental === a.key ? null : a.key;
+                    const setter = selectedNote.clef === "treble" ? setTrebleNotes : setBassNotes;
+                    setter(arr => arr.map((n,i) => i===selectedNote.idx ? { ...n, accidental:newAcc } : n));
+                  } else {
+                    setAccidental(cur => cur === a.key ? null : a.key);
+                  }
+                }}
+                title={a.label} style={{
+                  padding:"3px 9px", borderRadius:7,
+                  border:`1.5px solid ${isActive ? "#22d3ee" : border}`,
+                  background: isActive ? "#22d3ee22" : "transparent",
+                  color: isActive ? "#22d3ee" : "#6b7280",
+                  fontSize:16, cursor:"pointer", lineHeight:1
+                }}>{a.symbol}</button>
+            );
+          })}
         </div>
  
         <div style={{ flex:1 }}/>
@@ -447,21 +607,7 @@ export default function SheetMusicEditor() {
           background:"transparent", color:"#6b7280", fontSize:12, fontWeight:700, cursor:"pointer"
         }}>🗑 Clear</button>
       </div>
- 
-      {/* ── Hint bar ── */}
-      <div style={{ background:"#0d1117", borderBottom:`1px solid ${border}`,
-        padding:"5px 20px", display:"flex", alignItems:"center", gap:10 }}>
-        <span style={{ fontSize:11, color:"#4b5563" }}>
-          Select a duration above, then
-          <strong style={{ color:"#fb923c" }}> click anywhere on the staff </strong>
-          to place a note.
-          {hoverPitch && (
-            <span style={{ color:"#a78bfa", marginLeft:8 }}>
-              → {hoverPitch} {selectedDurSymbol}
-            </span>
-          )}
-        </span>
-      </div>
+
  
       {/* ── Score area ── */}
       <div style={{ flex:1, overflowY:"auto", overflowX:"auto", padding:16 }}>
@@ -517,23 +663,35 @@ export default function SheetMusicEditor() {
                 </div>
               );
             })()}
+
+            {/* Selection ring around the note currently being edited */}
+            {selectedNote && (() => {
+              const pts = notePositionsRef.current[selectedNote.clef] || [];
+              const p = pts.find(pt => pt.idx === selectedNote.idx);
+              if (!p) return null;
+              const { w, h } = svgSizeRef.current;
+              const container = scoreRef.current;
+              const svg = container?.querySelector("svg");
+              if (!svg) return null;
+              const rect = svg.getBoundingClientRect();
+              const scaleX = rect.width  / w;
+              const scaleY = rect.height / h;
+              const px = p.x * scaleX;
+              const py = p.y * scaleY;
+              return (
+                <div style={{
+                  position:"absolute",
+                  left: px - 18,
+                  top:  py - 18,
+                  pointerEvents:"none",
+                  background:"rgba(34,211,238,0.12)",
+                  border:"2.5px solid #22d3ee",
+                  borderRadius:"50%",
+                  width:36, height:36,
+                }}/>
+              );
+            })()}
           </div>
-        </div>
- 
-        {/* Summary strip */}
-        <div style={{ marginTop:12, display:"flex", gap:10, flexWrap:"wrap" }}>
-          {[
-            ["𝄞 Treble", trebleNotes.length+" notes", accentLight],
-            ["𝄢 Bass",   bassNotes.length+" notes",   "#f472b6" ],
-            ["Key",      keySignature,                 "#fb923c" ],
-            ["Time",     timeSig,                      "#4ade80" ],
-          ].map(([label, val, color]) => (
-            <div key={label} style={{ background:panel, borderRadius:9,
-              padding:"6px 12px", border:`1px solid ${border}`, fontSize:12 }}>
-              <span style={{ color:"#4b5563" }}>{label}: </span>
-              <span style={{ color, fontWeight:700 }}>{val}</span>
-            </div>
-          ))}
         </div>
       </div>
     </div>

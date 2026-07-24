@@ -11,7 +11,7 @@
  */
 
 import { useState, useRef, useCallback } from "react";
-import { freqToNoteInfo } from "../audio/theory";
+import { freqToNoteInfo } from "./audioTheory";
 
 export function useMic(audioCtxRef) {
   const [micOn,    setMicOn]    = useState(false);

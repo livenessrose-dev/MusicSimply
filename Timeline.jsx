@@ -10,15 +10,15 @@
  *
  * Props:
  *   audioCtxRef — ref to AudioContext
- *   bpm         — current BPM
+ *   bpm — current BPM
  */
 
 import { useState, useRef } from "react";
-import { useTracks } from "../../context/TrackContext";
-import { playPianoNote } from "../../audio/synth";
-import { playDrumSound }  from "../../audio/synth";
-import { noteToFreq }     from "../../audio/theory";
-import { NOTE_NAMES, DRUM_SOUNDS, DRUM_COLORS } from "../../constants";
+import { useTracks } from "./TrackContext";
+import { playPianoNote } from "./synth";
+import { playDrumSound }  from "./synth";
+import { noteToFreq }     from "./audioTheory";
+import { NOTE_NAMES, DRUM_SOUNDS, DRUM_COLORS } from "./theory";
 
 const PX_PER_MS  = 0.1;
 const TYPE_ICON  = { piano:"🎹", drum:"🥁", mic:"🎙" };

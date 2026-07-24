@@ -8,9 +8,9 @@ const LANE_LEFT_OFFSET = 160; // px — width of the track-info column, so lanes
 const TIME_SIG_OPTIONS = ["4/4", "3/4", "2/4", "6/8"];
 
 const DEFAULT_TRACKS = [
-  { id:1, name:"Piano",  icon:"🎹", color:"#a78bfa", muted:false, soloed:false, armed:false },
-  { id:2, name:"Guitar", icon:"🎸", color:"#fb923c", muted:false, soloed:false, armed:false },
-  { id:3, name:"Voice",  icon:"🎤", color:"#f472b6", muted:false, soloed:false, armed:false },
+  { id:1, name:"Piano",  icon:"🎹", color:"#a78bfa", muted:false, soloed:false, armed:false, sampleName:null },
+  { id:2, name:"Guitar", icon:"🎸", color:"#fb923c", muted:false, soloed:false, armed:false, sampleName:null },
+  { id:3, name:"Voice",  icon:"🎤", color:"#f472b6", muted:false, soloed:false, armed:false, sampleName:null },
 ];
 
 function formatTime(sec) {
@@ -18,6 +18,57 @@ function formatTime(sec) {
   const s = Math.floor(sec % 60);
   const t = Math.floor((sec * 10) % 10);
   return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}.${t}`;
+}
+
+// ── Sampler ─────────────────────────────────────────────────────────────
+// A sampler plays back a recorded audio clip instead of synthesizing a
+// waveform. The only real trick: to make one recording sound at a *different*
+// pitch, you change its playback speed — exactly like a record player.
+// 12 semitones = 1 octave = a doubling of frequency, so shifting by `n`
+// semitones means multiplying speed by 2^(n/12). That's the whole idea.
+//
+// This class has zero React in it on purpose — it's plain Web Audio API,
+// so you could drop it into a vanilla JS page or a different framework
+// unchanged. React's job below is just to *own* one of these per track.
+class Sampler {
+  constructor(audioContext) {
+    this.ctx = audioContext;
+    this.buffer = null;   // the decoded audio, once loaded — null until then
+    this.rootNote = 60;   // MIDI note the sample "is" (60 = middle C) — used to compute pitch shift
+  }
+
+  // Decode a File (e.g. from a drag-and-drop or <input type="file">) into
+  // an AudioBuffer — audio data sitting in memory, ready to play instantly.
+  async loadFromFile(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    this.buffer = await this.ctx.decodeAudioData(arrayBuffer);
+    this.name = file.name;
+  }
+
+  // Play the loaded sample. `midiNote` defaults to the root note, i.e. no
+  // pitch shift — just play the recording back as-is.
+  play(midiNote = this.rootNote, velocity = 1) {
+    if (!this.buffer) return null;
+
+    const semitones = midiNote - this.rootNote;
+    const playbackRate = Math.pow(2, semitones / 12);
+
+    // AudioBufferSourceNode is a ONE-SHOT play head — it can only be
+    // started once and then it's done. That's why we create a brand new
+    // one on every single play() call instead of reusing one.
+    const source = this.ctx.createBufferSource();
+    source.buffer = this.buffer;
+    source.playbackRate.value = playbackRate;
+
+    // A gain node is our volume knob — used here for velocity, and it's
+    // also where you'd add fade-in/out envelopes to avoid audio clicks.
+    const gain = this.ctx.createGain();
+    gain.gain.value = velocity;
+
+    source.connect(gain).connect(this.ctx.destination);
+    source.start();
+    return source; // caller can call source.stop() to cut it off early
+  }
 }
 
 export default function MusicStudioTracks() {
@@ -31,6 +82,36 @@ export default function MusicStudioTracks() {
   const [elapsedSec,  setElapsedSec]  = useState(0);
 
   const intervalRef = useRef(null);
+
+  // ── Audio engine ────────────────────────────────────────────────────────
+  // One shared AudioContext for the whole page (browsers require it to be
+  // created/resumed from a real user gesture, e.g. a click — so we create
+  // it lazily on first use rather than on mount).
+  const audioCtxRef  = useRef(null);
+  const samplersRef  = useRef({}); // { [trackId]: Sampler }
+
+  function getSampler(trackId) {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (!samplersRef.current[trackId]) {
+      samplersRef.current[trackId] = new Sampler(audioCtxRef.current);
+    }
+    return samplersRef.current[trackId];
+  }
+
+  async function loadSampleIntoTrack(trackId, file) {
+    if (audioCtxRef.current?.state === "suspended") await audioCtxRef.current.resume();
+    const sampler = getSampler(trackId);
+    await sampler.loadFromFile(file);
+    setTracks(t => t.map(tr => tr.id === trackId ? { ...tr, sampleName: file.name } : tr));
+  }
+
+  function playTrackSample(trackId) {
+    const sampler = samplersRef.current[trackId];
+    if (audioCtxRef.current?.state === "suspended") audioCtxRef.current.resume();
+    sampler?.play();
+  }
 
   // ── Derived timing ──────────────────────────────────────────────────────
   const beatsPerMeasure = parseInt(timeSig.split("/")[0], 10) || 4;
@@ -67,6 +148,11 @@ export default function MusicStudioTracks() {
     return () => clearInterval(intervalRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, isLooping, totalSec]);
+
+  // ── Close the audio context when this page unmounts ────────────────────
+  useEffect(() => {
+    return () => { audioCtxRef.current?.close(); };
+  }, []);
 
   function togglePlay() {
     if (isPlaying) { setIsPlaying(false); setIsRecording(false); }
@@ -260,8 +346,15 @@ export default function MusicStudioTracks() {
               }}>{tr.icon} {tr.name}</span>
             </div>
 
-            {/* Waveform lane */}
-            <div className="track-lane" style={{ position:"relative", flex:1, overflowX:"auto", minHeight:44 }}>
+            {/* Waveform lane — drop an audio file here to load it into this track's sampler */}
+            <div className="track-lane"
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => {
+                e.preventDefault();
+                const file = e.dataTransfer.files?.[0];
+                if (file) loadSampleIntoTrack(tr.id, file);
+              }}
+              style={{ position:"relative", flex:1, overflowX:"auto", minHeight:44 }}>
               <div style={{ position:"absolute", inset:0, display:"flex" }}>
                 {measures.map((_, mi) => (
                   <div key={mi} style={{ width:MEASURE_W, flexShrink:0,
@@ -276,10 +369,17 @@ export default function MusicStudioTracks() {
                 <div style={{ display:"flex", gap:8 }}>
                   <button style={{ width:26, height:26, borderRadius:"50%", border:"none",
                     cursor:"pointer", background:"#374151", color:"#e5e7eb", fontSize:11 }}>⏺</button>
-                  <button style={{ width:26, height:26, borderRadius:"50%", border:"none",
-                    cursor:"pointer", background:"#374151", color:"#e5e7eb", fontSize:11 }}>▶</button>
+                  <button onClick={() => playTrackSample(tr.id)} disabled={!tr.sampleName} style={{
+                    width:26, height:26, borderRadius:"50%", border:"none",
+                    cursor: tr.sampleName ? "pointer" : "default",
+                    background: tr.sampleName ? tr.color+"33" : "#374151",
+                    color: tr.sampleName ? tr.color : "#e5e7eb", fontSize:11,
+                    opacity: tr.sampleName ? 1 : 0.5,
+                  }}>▶</button>
                 </div>
-                <span style={{ fontSize:11, color:"#4b5563", letterSpacing:1 }}>EMPTY</span>
+                <span style={{ fontSize:11, color: tr.sampleName ? "#9ca3af" : "#4b5563", letterSpacing:1 }}>
+                  {tr.sampleName ?? "DROP AUDIO HERE"}
+                </span>
               </div>
             </div>
 
@@ -293,8 +393,22 @@ export default function MusicStudioTracks() {
         ))}
       </div>
 
-      {/* ── Drop zone ── */}
-      <div style={{ margin:20, padding:"28px 20px", textAlign:"center",
+      {/* ── Drop zone — dropping here creates a brand-new track loaded with that file ── */}
+      <div
+        onDragOver={e => e.preventDefault()}
+        onDrop={e => {
+          e.preventDefault();
+          const file = e.dataTransfer.files?.[0];
+          if (!file) return;
+          const id = nextId;
+          setTracks(t => [...t, {
+            id, name: file.name.replace(/\.[^/.]+$/, ""), icon:"🎵", color:"#38bdf8",
+            muted:false, soloed:false, armed:false, sampleName:null,
+          }]);
+          setNextId(n => n + 1);
+          loadSampleIntoTrack(id, file);
+        }}
+        style={{ margin:20, padding:"28px 20px", textAlign:"center",
         border:`1.5px dashed ${border}`, borderRadius:10, color:"#4b5563" }}>
         <div style={{ fontSize:20, marginBottom:4 }}>🎵</div>
         Drop an audio file here

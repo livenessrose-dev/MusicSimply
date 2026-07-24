@@ -1,4 +1,4 @@
-File Structure
+# 🎵 My Music Studio — File Structure
 
 ```
 MusicStudio/
@@ -55,7 +55,7 @@ MusicStudio/
 
 ## How to add a new feature
 
-### Add a new tab 
+### Add a new tab (e.g. "🎸 Chord Dictionary")
 1. Add the label to `TABS` in `src/constants/index.js`
 2. Create `src/components/ChordDict/ChordDictionary.jsx`
 3. Import it in `MusicStudio.jsx` and add `{tab === 6 && <ChordDictionary/>}`
