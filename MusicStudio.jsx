@@ -1,20 +1,17 @@
 /**
- * MusicStudio.jsx  —  Root entry point
+ * MusicStudio.jsx
  *
- * This file is intentionally thin. It:
- *   1. Wraps everything in <TrackProvider>
- *   2. Owns the single shared AudioContext ref
- *   3. Renders the top bar (BPM, metronome, mic status)
- *   4. Renders the tab bar
- *   5. Mounts the correct tab component
  *
- * To add a new tab:
- *   - Add its label to TABS in src/constants/index.js
- *   - Import the component here
- *   - Add a {tab === N && <YourComponent/>} line in the content section
+ *   Wraps everything in <TrackProvider>
+ *   Owns the single shared AudioContext ref
+ *   Renders the top bar (BPM, metronome, mic status)
+ *   Renders the tab bar
+ *   Mounts the correct tab component
+ *
  */
 
 import { useState, useRef } from "react";
+import Image from "next/image";            
 
 // ── Context ───────────────────────────────────────────────────────────────────
 import { TrackProvider, useTracks } from "./TrackContext";
@@ -32,8 +29,14 @@ import RecordingTracks   from "./RecordingTracks";
 import Timeline          from "./Timeline";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-import { TABS } from "./theory";
-
+const TAB_ITEMS = [
+  { label: "Tuner",    icon: "/icons/iconTuner.svg" },
+  { label: "Chords",   icon: "/icons/iconMusicNoteList.svg" },
+  { label: "Piano",    icon: "/icons/iconPianoOn.svg" },
+  { label: "Drums",    icon: "/icons/iconMix.svg" },
+  { label: "Tracks",   icon: "/icons/iconTracks.svg" },
+  { label: "Timeline", icon: "/icons/iconTimeLine.svg" },
+];
 // ─────────────────────────────────────────────────────────────────────────────
 // Inner app (inside TrackProvider so useTracks() works)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,7 +92,7 @@ function AppInner() {
       <div style={{background:"#111827",borderBottom:"1px solid #1f2937",padding:"8px 18px",display:"flex",alignItems:"center",gap:12,flexShrink:0,flexWrap:"wrap"}}>
         {/* Title */}
         <div style={{fontFamily:"'Fredoka One',cursive",fontSize:20,background:"linear-gradient(135deg,#a78bfa,#f472b6,#fb923c)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>
-          🎵 My Music Studio
+           MusicSimply
         </div>
         <div style={{flex:1}}/>
 
@@ -141,26 +144,29 @@ function AppInner() {
         </div>
       </div>
 
-      {/* ── Tab bar ──────────────────────────────────────────────────────── */}
-      <div style={{background:"#0d1117",borderBottom:"1px solid #1f2937",padding:"0 14px",display:"flex",gap:1,flexShrink:0,overflowX:"auto"}}>
-        {TABS.map((label, i) => (
-          <button key={i} onClick={() => setTab(i)} style={{
-            padding:"9px 14px", border:"none", background:"transparent",
-            cursor:"pointer", fontFamily:"'Fredoka One',cursive", fontSize:13,
-            color:       tab === i ? "#a78bfa" : "#6b7280",
-            borderBottom: tab === i ? "2px solid #a78bfa" : "2px solid transparent",
-            whiteSpace:"nowrap", position:"relative",
-          }}>
-            {label}
-            {/* Badge */}
-            {tabBadge(i) && (
-              <span style={{position:"absolute",top:6,right:6,width:16,height:16,borderRadius:"50%",background:"#f472b6",color:"#fff",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"monospace"}}>
-                {tabBadge(i)}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      
+  {/* ── Tab bar ──────────────────────────────────────────────────────── */}
+    <div style={{background:"#0d1117",borderBottom:"1px solid #1f2937",padding:"0 14px",display:"flex",gap:1,flexShrink:0,overflowX:"auto"}}>
+  {TAB_ITEMS.map((item, i) => (
+    <button key={i} onClick={() => setTab(i)} style={{
+      padding:"9px 14px", border:"none", background:"transparent",
+      cursor:"pointer", fontFamily:"'Fredoka One',cursive", fontSize:13,
+      color:       tab === i ? "#a78bfa" : "#6b7280",
+      borderBottom: tab === i ? "2px solid #a78bfa" : "2px solid transparent",
+      whiteSpace:"nowrap", position:"relative",
+      display:"flex", alignItems:"center", gap:6,
+    }}>
+      <Image src={item.icon} alt="" width={16} height={16}
+        style={{ opacity: tab === i ? 1 : 0.6 }}/>
+      {item.label}
+      {tabBadge(i) && (
+        <span style={{position:"absolute",top:6,right:6,width:16,height:16,borderRadius:"50%",background:"#f472b6",color:"#fff",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"monospace"}}>
+          {tabBadge(i)}
+        </span>
+      )}
+    </button>
+  ))}                                     
+  </div>
 
       {/* ── Tab content ──────────────────────────────────────────────────── */}
       <div style={{flex:1,overflowY:"auto",padding:18}}>
