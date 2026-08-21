@@ -1,70 +1,94 @@
-# Getting Started with Create React App
+# 🎵 My Music Studio — File Structure
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+```
+MusicStudio/
+├── MusicStudio.jsx               ← Root entry point (thin shell, mount this)
+│
+└── src/
+    ├── constants/
+    │   └── index.js              ← Every magic string/number: NOTE_NAMES,
+    │                               CHORD_INTERVALS, DRUM_SOUNDS, PIANO_KEYS,
+    │                               TABS, TRACK_COLORS, GUITAR_STRINGS, etc.
+    │
+    ├── context/
+    │   └── TrackContext.jsx      ← Global DAW store (useReducer).
+    │                               Call useTracks() anywhere to read/write tracks.
+    │                               Track shapes are documented here.
+    │
+    ├── audio/
+    │   ├── theory.js             ← Pure music-theory functions (no React, no DOM).
+    │   │                           noteToFreq, freqToNoteInfo, detectChordFromNotes,
+    │   │                           getProgressions, qSnap (quantize)
+    │   │
+    │   └── synth.js              ← Web Audio synthesis.
+    │                               playPianoNote(ctx, freq, duration, vol)
+    │                               playDrumSound(ctx, name, when)
+    │
+    ├── hooks/
+    │   ├── useMic.js             ← Opens mic, runs pitch detector loop.
+    │   │                           Returns { micOn, noteInfo, toggleMic }
+    │   │
+    │   └── useMetronome.js       ← Audible click + beat LED index (0–3).
+    │                               Returns current beat number.
+    │
+    └── components/
+        ├── Tuner/
+        │   └── SemicircleTuner.jsx   ← SVG arc tuner + string reference grid
+        │
+        ├── Chords/
+        │   └── ChordAnalyzer.jsx     ← Mic note accumulator + chord/progression UI
+        │
+        ├── Piano/
+        │   └── VirtualPiano.jsx      ← 2-octave keyboard + sheet-music staff + recording
+        │
+        ├── Drums/
+        │   └── DrumMachine.jsx       ← 16-step percussion sequencer
+        │
+        ├── Tracks/
+        │   └── RecordingTracks.jsx   ← Mic recording list with waveform canvas
+        │
+        └── Timeline/
+            └── Timeline.jsx          ← DAW lane view + Play All engine
+```
 
-## Available Scripts
+---
 
-In the project directory, you can run:
+## How to add a new feature
 
-### `npm start`
+### Add a new tab (e.g. "🎸 Chord Dictionary")
+1. Add the label to `TABS` in `src/constants/index.js`
+2. Create `src/components/ChordDict/ChordDictionary.jsx`
+3. Import it in `MusicStudio.jsx` and add `{tab === 6 && <ChordDictionary/>}`
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+### Add a new drum sound
+1. Add the name to `DRUM_SOUNDS` in `src/constants/index.js`
+2. Add its hex colour to `DRUM_COLORS` (same index)
+3. Add a synthesis case in `src/audio/synth.js` → `playDrumSound()`
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+### Add a new chord type
+1. Add `"name": [interval, interval, …]` to `CHORD_INTERVALS` in `src/constants/index.js`
+2. Optionally add a human-readable label to `CHORD_TYPE_LABELS`
 
-### `npm test`
+### Add a new track type (e.g. sampler)
+1. Document its shape at the top of `src/context/TrackContext.jsx`
+2. Handle it in the `Timeline` block-render section
+3. Handle playback in `Timeline.jsx → playAll()`
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+### Change the BPM default or key range
+All in `src/constants/index.js` — one file to change, guaranteed consistent everywhere.
 
-### `npm run build`
+---
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Data flow
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+```
+useMic() ──► noteInfo ──► SemicircleTuner   (display)
+                     └──► ChordAnalyzer     (detect chords)
+                     └──► VirtualPiano      (for keyboard midi comparison)
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+VirtualPiano  ──► addTrack({ type:"piano", events, … })  ──► TrackContext
+DrumMachine   ──► addTrack({ type:"drum",  events, … })  ──► TrackContext
+RecordingTracks ► addTrack({ type:"mic",   audioUrl, … }) ──► TrackContext
 
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+TrackContext.tracks ──► Timeline (read + play all)
+```
